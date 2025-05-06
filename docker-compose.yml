@@ -1,0 +1,286 @@
+services:
+  # ------ Backend Services (Scalable) ------
+  auth-service:
+    ##ports:
+      ##- "5101:5000"
+    depends_on:
+       postgres:
+        condition: service_healthy
+    env_file: 
+      - .env
+    build: ./auth-service
+    command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=120 -- python app.py"]
+    environment:
+      ##- POSTGRES_HOST=postgres
+      ##- POSTGRES_PORT=5432
+      DB_URI: postgresql://chatuser:avijit123@postgres:5432/auth_service_db
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    expose: 
+      - "5000"
+    
+    deploy:
+      replicas: 1
+    networks:
+      - app-network
+
+  user-service:
+    build: ./user-service
+    command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=60 -- python app.py"]
+    depends_on:
+       postgres:
+        condition: service_healthy
+    
+    
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations: 
+          memory: 256M
+          cpus: '0.3'
+    environment:
+      DB_URI: postgresql://chatuser:avijit123@postgres:5432/user_service_db
+      PRIMARY_INSTANCE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health | grep '\"status\":\"healthy\"' || exit 1"]
+      start_period: 30s
+      timeout: 5s
+      retries: 5
+      interval: 15s
+    networks:
+      - app-network
+    ##ports:
+      ##- "5002:5000" 
+      ##- "5000:5000"
+    expose: 
+      - "5000"
+
+  chat-service:
+    build: ./chat-service
+    command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=30 -- python app.py"]
+    depends_on:
+      postgres-shard0:
+        condition: service_healthy
+      postgres-shard1:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy 
+      postgres:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    ##For horizontal scaling before moving towards nginx
+    deploy:
+      replicas: 2
+      resources: 
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    expose: 
+      - "5000"
+    
+    environment:
+      #- DB_URI=postgresql://chatuser:avijit123@postgres:5432/chat_messages_db
+      #- SECRET_KEY=your_very_secure_key_here
+      - DB_URI_SHARD0=postgresql://chatuser:avijit123@postgres-shard0:5432/shard0
+      - DB_URI_SHARD1=postgresql://chatuser:avijit123@postgres-shard1:5432/shard1
+      
+
+    networks:
+      - app-network
+    ##ports: 
+      ##- "5201:5000"
+
+  # ------ Database (PostgreSQL 17) ------
+  postgres:
+    build: ./postgres
+    platform: linux/amd64
+    image: postgres:17
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: chatuser
+      POSTGRES_PASSWORD: avijit123
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+  postgres-shard0:
+    image: postgres:17
+    platform: linux/amd64
+    container_name: postgres-shard0
+    hostname: postgres-shard0
+    build: 
+      context: ./postgres
+      dockerfile: Dockerfile.shard
+    environment:
+      POSTGRES_USER: chatuser
+      POSTGRES_PASSWORD: avijit123
+      POSTGRES_DB: shard0
+    volumes:
+      #- pgdata-shard0:/var/lib/postgresql/data
+      - ./postgres/init-scripts/init-shard.sh:/docker-entrypoint-initdb.d/init-shard.sh
+      - ./postgres/init-scripts/init-sharding.sql:/docker-entrypoint-initdb.d/init-sharding.sql
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+      
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+  postgres-shard1:
+    image: postgres:17
+    platform: linux/amd64
+    container_name: postgres-shard1
+    hostname: postgres-shard1
+    build: 
+      context: ./postgres
+      dockerfile: Dockerfile.shard
+    environment:
+      POSTGRES_USER: chatuser
+      POSTGRES_PASSWORD: avijit123
+      POSTGRES_DB: shard1
+    volumes:
+      #- pgdata-shard1:/var/lib/postgresql/data
+      - ./postgres/init-scripts/init-shard.sh:/docker-entrypoint-initdb.d/init-shard.sh
+      - ./postgres/init-scripts/init-sharding.sql:/docker-entrypoint-initdb.d/init-sharding.sql
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+
+  # ------ Load Balancers (Nginx) ------
+  auth-lb:
+    image: nginx
+    ports:
+      - "8001:80"
+    volumes:
+      - ./nginx/auth-service/auth.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  user-lb:
+    image: nginx
+    ports:
+      - "8000:80"
+    volumes:
+      - ./nginx/user-service/user.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      user-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  chat-lb:
+    image: nginx
+    ports:
+      - "8002:80"
+    volumes:
+      - ./nginx/chat-service/chat.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      chat-service:
+        condition: service_healthy
+    networks:
+      - app-network
+
+# Applying API gateway and cache system (Redis)
+
+  api-gateway:
+    build: ./api-gateway
+    environment:
+      - REDIS_HOST=redis
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - USER_SERVICE_URL=http://user-service:5000
+      - CHAT_SERVICE_URL=http://chat-service:5000
+      - SECRET_KEY=your-very-secure-secret-key
+    ports:
+      - "5001:5000"
+    depends_on:
+      - redis
+      - auth-service
+      - user-service
+      - chat-service
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx
+    ports:
+      - "80:80"  # This is critical
+    volumes:
+      - ./nginx/api-gateway.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - api-gateway
+    networks:
+      - app-network
+
+
+
+# ------ Infrastructure ------
+volumes:
+  pgdata:
+  pgdata-shard0:
+  pgdata-shard1:
+  redis_data:
+
+networks:
+  app-network:
+    name: app-network
+    driver: bridge
+    attachable: true

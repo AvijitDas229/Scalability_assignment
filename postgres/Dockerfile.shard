@@ -1,0 +1,13 @@
+ARG TARGETARCH
+FROM --platform=$TARGETARCH postgres:17
+
+# Copy individual init files for shards
+COPY init-scripts/init-shard.sh /docker-entrypoint-initdb.d/
+COPY init-scripts/init-sharding.sql /docker-entrypoint-initdb.d/
+
+# Ensure shell script is executable
+RUN chmod +x /docker-entrypoint-initdb.d/init-shard.sh
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
+    CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB

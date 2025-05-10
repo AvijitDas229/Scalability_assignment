@@ -1,0 +1,67 @@
+from flask import Flask, request, jsonify
+import requests
+import redis
+import os
+from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
+
+app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = 'your-very-secure-secret-key'  # Must match auth service
+jwt = JWTManager(app)
+
+# Redis connection
+redis_client = redis.Redis(host='redis', port=6379, db=0)
+
+SERVICE_MAP = {
+    'auth': os.getenv('AUTH_SERVICE_URL'),
+    'user': os.getenv('USER_SERVICE_URL'),
+    'chat': os.getenv('CHAT_SERVICE_URL')
+}
+
+def forward_request(service, path):
+    # Skip JWT verification for health checks and auth endpoints
+    if not (path.startswith('health') or (service == 'auth' and path in ['login', 'register'])):
+        verify_jwt_in_request()
+    
+    url = f"{SERVICE_MAP[service]}/{path}"
+    headers = {key: value for (key, value) in request.headers if key != 'Host'}
+    
+    # Forward the request
+    response = requests.request(
+        method=request.method,
+        url=url,
+        headers=headers,
+        data=request.get_data(),
+        cookies=request.cookies,
+        allow_redirects=False
+    )
+    
+    return response
+
+@app.route('/<service>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def gateway_proxy(service, path):
+    if service not in SERVICE_MAP:
+        return jsonify({"error": "Invalid service"}), 404
+    
+    # Special handling for user/me with caching
+    if service == 'user' and path == 'me':
+        user_id = get_jwt_identity()
+        cache_key = f"user:{user_id}"
+        cached_data = redis_client.get(cache_key)
+        
+        if cached_data:
+            return jsonify(cached_data), 200
+    
+    response = forward_request(service, path)
+    
+    # Cache user data if successful
+    if service == 'user' and path == 'me' and response.status_code == 200:
+        redis_client.setex(cache_key, 300, response.text)
+    
+    return jsonify(response.json()), response.status_code
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "healthy"}), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

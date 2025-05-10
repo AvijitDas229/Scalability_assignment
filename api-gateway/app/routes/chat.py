@@ -15,3 +15,7 @@ def send_message():
     data['sender_id'] = "extracted-from-token"
     
     return ChatClient.send_message(data)
+
+@bp.route('/messages', methods=['GET'])
+def get_messages():
+    return ChatClient.get_messages()

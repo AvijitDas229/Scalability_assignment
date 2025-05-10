@@ -3,6 +3,7 @@ from config import Config
 from requests.exceptions import RequestException
 from flask import jsonify, request
 
+
 class ChatClient:
     @staticmethod
     def send_message(message_data):
@@ -16,3 +17,11 @@ class ChatClient:
             return response.json(), response.status_code
         except RequestException as e:
             return jsonify({'error': f'Chat service unavailable: {str(e)}'}), 503
+
+    @staticmethod
+    def get_messages():
+        headers = {
+            "Authorization": request.headers.get("Authorization")
+        }
+        response = requests.get(f"{Config.CHAT_SERVICE_URL}/messages", headers=headers)
+        return response.json(), response.status_code

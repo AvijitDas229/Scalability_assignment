@@ -1,11 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-import jwt  # Ensure PyJWT is installed
+import jwt
 import datetime
 from functools import wraps
 import requests
-import os
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chatuser:avijit123@postgres:5432/auth_service_db'
@@ -33,13 +32,14 @@ def token_required(f):
 
         try:
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            current_user = User.query.get(int(data["sub"]))
+            user_id = int(data['sub'])  # Ensure correct type
+            current_user = User.query.get(user_id)
             if not current_user:
                 return jsonify({'error': 'User not found'}), 404
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token expired'}), 401
         except Exception as e:
-            return jsonify({'error': str(e)}), 401
+            return jsonify({'error': 'Invalid token', 'details': str(e)}), 401
 
         return f(current_user, *args, **kwargs)
     return decorated
@@ -62,7 +62,7 @@ def register():
     db.session.add(user)
     db.session.commit()
 
-    # Attempt to sync user to user-service
+    # Sync user to user-service
     try:
         sync_response = requests.post(
             'http://user-service:5000/users',
@@ -90,12 +90,16 @@ def login():
         return jsonify({'error': 'Invalid credentials'}), 401
 
     token = jwt.encode({
-    'sub': str(user.id),
-    'user_id': str(user.id),  # Add user_id explicitly
-    'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
-}, app.config['SECRET_KEY'], algorithm="HS256")
+        'user_id': user.id,  # Ensure subject is string (standard claim)
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    }, app.config['SECRET_KEY'], algorithm="HS256")
 
     return jsonify({'access_token': token})
+
+@app.route('/protected', methods=['GET'])
+@token_required
+def protected(current_user):
+    return jsonify({'message': f'Welcome {current_user.username}!'})
 
 @app.route('/health', methods=['GET'])
 def health():

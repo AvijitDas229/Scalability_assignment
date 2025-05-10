@@ -120,9 +120,11 @@ services:
       POSTGRES_USER: chatuser
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: postgres
+      POSTGRES_MULTIPLE_DATABASES: chat_service_db,user_service_db,auth_service_db
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # REMOVE host-mounted script and use custom image instead
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+      - ./init-multiple-postgres.sh:/docker-entrypoint-initdb.d/init-multiple-postgres.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 5s
@@ -132,19 +134,23 @@ services:
       - app-network
 
   postgres-shard0:
-    build:
-      context: ./postgres
-      dockerfile: Dockerfile.shard
-    image: shard0-postgres
+    image: postgres:17
     platform: linux/amd64
     container_name: postgres-shard0
     hostname: postgres-shard0
+    build: 
+      context: ./postgres
+      dockerfile: Dockerfile.shard
     environment:
       POSTGRES_USER: chatuser
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: shard0
     volumes:
-      - pgdata-shard0:/var/lib/postgresql/data
+      #- pgdata-shard0:/var/lib/postgresql/data
+      - ./postgres/init-scripts/init-shard.sh:/docker-entrypoint-initdb.d/init-shard.sh
+      - ./postgres/init-scripts/init-sharding.sql:/docker-entrypoint-initdb.d/init-sharding.sql
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+      
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 5s
@@ -154,19 +160,23 @@ services:
       - app-network
 
   postgres-shard1:
-    build:
-      context: ./postgres
-      dockerfile: Dockerfile.shard
-    image: shard1-postgres
+    image: postgres:17
     platform: linux/amd64
     container_name: postgres-shard1
     hostname: postgres-shard1
+    build: 
+      context: ./postgres
+      dockerfile: Dockerfile.shard
     environment:
       POSTGRES_USER: chatuser
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: shard1
     volumes:
-      - pgdata-shard1:/var/lib/postgresql/data
+      #- pgdata-shard1:/var/lib/postgresql/data
+      - ./postgres/init-scripts/init-shard.sh:/docker-entrypoint-initdb.d/init-shard.sh
+      - ./postgres/init-scripts/init-sharding.sql:/docker-entrypoint-initdb.d/init-sharding.sql
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
       interval: 5s
@@ -174,7 +184,6 @@ services:
       retries: 10
     networks:
       - app-network
-
 
 
   # ------ Load Balancers (Nginx) ------

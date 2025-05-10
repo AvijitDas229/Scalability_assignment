@@ -1,0 +1,85 @@
+from flask import Flask, request, jsonify
+import os
+import time
+from dotenv import load_dotenv
+from sqlalchemy.exc import OperationalError
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import (
+    JWTManager, create_access_token,
+    jwt_required, get_jwt_identity
+)
+from models import db, User
+
+load_dotenv()
+
+app = Flask(__name__)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DB_URI")
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = 'your-very-secure-secret-key'
+app.config['JWT_ALGORITHM'] = 'HS256'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 86400  # 24 hours
+
+db.init_app(app)
+jwt = JWTManager(app)
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({"error": "Username and password are required"}), 400
+
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "Username already exists"}), 409
+
+    new_user = User(username=data['username'])
+    new_user.set_password(data['password'])
+
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "User registered successfully", "user_id": new_user.id}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({"error": "Username and password required"}), 400
+
+    user = User.query.filter_by(username=data['username']).first()
+
+    if user and user.check_password(data['password']):
+        access_token = create_access_token(identity=user.id)
+        return jsonify({"access_token": access_token, "user_id": user.id}), 200
+
+    return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route('/auth/health', methods=['GET'])
+def health():
+    return jsonify({"status": "healthy"}), 200
+
+def initialize_database():
+    max_retries = 5
+    retry_delay = 5
+    with app.app_context():
+        for attempt in range(max_retries):
+            try:
+                db.create_all()
+                print("Database initialized successfully")
+                return
+            except OperationalError as e:
+                print(f"Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    raise
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "auth-service healthy"}), 200
+
+
+if __name__ == '__main__':
+    with app.app_context():
+        initialize_database()
+    app.run(host='0.0.0.0', port=5000)

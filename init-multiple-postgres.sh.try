@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+# Split comma-separated DB names into array
+IFS=',' read -ra DBS <<< "$POSTGRES_MULTIPLE_DATABASES"
+
+for db in "${DBS[@]}"; do
+  if [ "$db" != "postgres" ]; then
+    echo "Creating database: $db"
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" <<-EOSQL
+        CREATE DATABASE "$db";
+EOSQL
+  else
+    echo "Skipping creation of default 'postgres' database"
+  fi
+done
+# Create user and grant privileges for each database

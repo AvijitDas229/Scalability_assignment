@@ -17,6 +17,12 @@ def register():
         return jsonify({'error': 'Username and password required'}), 400
     return AuthClient.register(data['username'], data['password'])
 
+@bp.route('/protected', methods=['GET'])
+#@token_required  # if you're using a decorator
+def protected(current_user):
+    return jsonify({'message': f'Welcome {current_user.username}!'})
+
+
 @bp.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'healthy'})

@@ -4,9 +4,8 @@ services:
     ##ports:
       ##- "5101:5000"
     depends_on:
-       postgres:
-        condition: service_healthy
-    env_file: 
+      - postgres
+    env_file:
       - .env
     build: ./auth-service
     command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=120 -- python app.py"]
@@ -114,14 +113,17 @@ services:
     build: ./postgres
     platform: linux/amd64
     image: postgres:17
+    container_name: postgres
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: chatuser
+      POSTGRES_USER: chatuser 
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: postgres
+      POSTGRES_MULTIPLE_DATABASES: chat_service_db,user_service_db,auth_service_db
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      #- pgdata:/var/lib/postgresql/data
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
       # REMOVE host-mounted script and use custom image instead
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
@@ -130,6 +132,7 @@ services:
       retries: 10
     networks:
       - app-network
+  
 
   postgres-shard0:
     build:

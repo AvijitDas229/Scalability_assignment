@@ -9,6 +9,13 @@ app.config['JWT_SECRET_KEY'] = 'your-very-secure-secret-key'
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
+
+postgres_host = os.environ.get('POSTGRES_HOST', 'postgres')
+postgres_db = os.environ.get('POSTGRES_DB', 'chat_service_db')
+postgres_user = os.environ.get('POSTGRES_USER', 'postgres')
+postgres_password = os.environ.get('POSTGRES_PASSWORD', 'postgres')
+
+
 # ---------------------- MODELS -----------------------
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)

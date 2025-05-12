@@ -8,6 +8,9 @@ COPY init-scripts/init-sharding.sql /docker-entrypoint-initdb.d/
 # Ensure shell script is executable
 RUN chmod +x /docker-entrypoint-initdb.d/init-shard.sh
 
+RUN chmod +x /docker-entrypoint-initdb.d/*.sh
+
+
 # Health check
 HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
     CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB

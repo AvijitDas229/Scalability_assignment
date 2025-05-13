@@ -1,8 +1,8 @@
-version: '3.8'
-
 services:
   # ------ Backend Services (Scalable) ------
   auth-service:
+    ##ports:
+      ##- "5101:5000"
     depends_on:
       - postgres
     env_file:
@@ -12,7 +12,9 @@ services:
     environment:
       POSTGRES_HOST: postgres
       DB_HOST: postgres
+      ##- POSTGRES_PORT=5432
       DB_URI: postgresql://chatuser:avijit123@postgres:5432/auth_service_db
+
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
       interval: 30s
@@ -21,6 +23,7 @@ services:
       start_period: 30s
     expose: 
       - "5000"
+    
     deploy:
       replicas: 1
     networks:
@@ -30,8 +33,11 @@ services:
     build: ./user-service
     command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=60 -- python app.py"]
     depends_on:
-      postgres:
+       postgres:
         condition: service_healthy
+    #ports:
+      #- "5002:5000"
+    
     deploy:
       replicas: 1
       restart_policy:
@@ -54,6 +60,9 @@ services:
       interval: 15s
     networks:
       - app-network
+    ##ports:
+      ##- "5002:5000" 
+      ##- "5000:5000"
     expose: 
       - "5000"
 
@@ -71,12 +80,14 @@ services:
         condition: service_healthy
       user-service:
         condition: service_healthy
+
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
       interval: 30s
       timeout: 30s
       retries: 5
       start_period: 60s
+    ##For horizontal scaling before moving towards nginx
     deploy:
       replicas: 2
       resources: 
@@ -85,11 +96,18 @@ services:
           memory: 512M
     expose: 
       - "5000"
+    
     environment:
-      DB_URI_SHARD0: postgresql://chatuser:avijit123@postgres-shard0:5432/shard0
-      DB_URI_SHARD1: postgresql://chatuser:avijit123@postgres-shard1:5432/shard1
+      #- DB_URI=postgresql://chatuser:avijit123@postgres:5432/chat_messages_db
+      #- SECRET_KEY=your_very_secure_key_here
+      - DB_URI_SHARD0=postgresql://chatuser:avijit123@postgres-shard0:5432/shard0
+      - DB_URI_SHARD1=postgresql://chatuser:avijit123@postgres-shard1:5432/shard1
+      
+
     networks:
       - app-network
+    ##ports: 
+      ##- "5201:5000"
 
   # ------ Database (PostgreSQL 17) ------
   postgres:
@@ -103,10 +121,13 @@ services:
     environment:
       POSTGRES_USER: pgadmin 
       POSTGRES_PASSWORD: admin123
+      #POSTGRES_DB: postgres
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/initdb:/docker-entrypoint-initdb.d
+      #- ./postgres/init-scripts/00-init.sql:/docker-entrypoint-initdb.d/00-init.sql
+      # REMOVE host-mounted script and use custom image instead
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pgadmin"]
       interval: 5s
@@ -114,6 +135,7 @@ services:
       retries: 30
     networks:
       - app-network
+  
 
   postgres-shard0:
     build:
@@ -130,6 +152,8 @@ services:
     volumes:
       - postgres_shard0_data:/var/lib/postgresql/data
       - ./database/initdb/01-shard0.sql:/docker-entrypoint-initdb.d/01-shard0.sql
+      #- ./postgres/init-scripts/01-shard0.sql:/docker-entrypoint-initdb.d/01-init.sql
+      #- ./postgres/init-scripts/init-shard.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chatuser -d shard0"]
       interval: 5s
@@ -153,6 +177,8 @@ services:
     volumes:
       - postgres_shard1_data:/var/lib/postgresql/data
       - ./database/initdb/02-shard1.sql:/docker-entrypoint-initdb.d/02-shard1.sql
+      #- ./postgres/init-scripts/init-shard.sql:/docker-entrypoint-initdb.d/init.sql
+      #- ./postgres/init-scripts/03-shard1-schema.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U chatuser -d shard1"]
       interval: 5s
@@ -160,6 +186,8 @@ services:
       retries: 20
     networks:
       - app-network
+
+
 
   # ------ Load Balancers (Nginx) ------
   auth-lb:
@@ -198,26 +226,23 @@ services:
     networks:
       - app-network
 
-  # ------ API Gateway and Cache ------
+# Applying API gateway and cache system (Redis)
+
   api-gateway:
     build: ./api-gateway
     environment:
-      REDIS_HOST: redis
-      AUTH_SERVICE_URL: http://auth-service:5000
-      USER_SERVICE_URL: http://user-service:5000
-      CHAT_SERVICE_URL: http://chat-service:5000
-      SECRET_KEY: your-very-secure-secret-key
+      - REDIS_HOST=redis
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - USER_SERVICE_URL=http://user-service:5000
+      - CHAT_SERVICE_URL=http://chat-service:5000
+      - SECRET_KEY=your-very-secure-secret-key
     ports:
       - "5001:5000"
     depends_on:
-      redis:
-        condition: service_healthy
-      auth-service:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      chat-service:
-        condition: service_healthy
+      - redis
+      - auth-service
+      - user-service
+      - chat-service
     networks:
       - app-network
     healthcheck:
@@ -243,20 +268,21 @@ services:
   nginx:
     image: nginx
     ports:
-      - "80:80"
+      - "80:80"  # This is critical
     volumes:
       - ./nginx/api-gateway.conf:/etc/nginx/conf.d/default.conf
     depends_on:
-      api-gateway:
-        condition: service_healthy
+      - api-gateway
     networks:
       - app-network
 
-# ------ Volumes and Networks ------
+
+
+# ------ Infrastructure ------
 volumes:
-  postgres_data:
-  postgres_shard0_data:
-  postgres_shard1_data:
+  pgdata:
+  pgdata-shard0:
+  pgdata-shard1:
   redis_data:
 
 networks:

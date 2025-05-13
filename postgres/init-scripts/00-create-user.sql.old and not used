@@ -1,0 +1,19 @@
+-- Create both admin and application users
+DO $$
+BEGIN
+  -- Create admin user if not exists
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgadmin') THEN
+    CREATE ROLE pgadmin WITH LOGIN PASSWORD 'admin123' SUPERUSER;
+  END IF;
+  
+  -- Create application user if not exists
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'chatuser') THEN
+    CREATE ROLE chatuser WITH LOGIN PASSWORD 'avijit123' CREATEDB;
+  END IF;
+END $$;
+
+-- Set permissions in template1 (affects new databases)
+\c template1
+GRANT ALL ON SCHEMA public TO chatuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO chatuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO chatuser;

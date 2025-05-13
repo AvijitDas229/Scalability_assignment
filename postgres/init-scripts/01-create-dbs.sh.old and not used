@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+# Use the admin user to create databases
+psql -v ON_ERROR_STOP=1 --username "pgadmin" <<-EOSQL
+  CREATE DATABASE auth_service_db OWNER chatuser;
+  CREATE DATABASE user_service_db OWNER chatuser;
+  CREATE DATABASE chat_service_db OWNER chatuser;
+  
+  \c auth_service_db
+  GRANT ALL ON SCHEMA public TO chatuser;
+  
+  \c user_service_db
+  GRANT ALL ON SCHEMA public TO chatuser;
+  
+  \c chat_service_db
+  GRANT ALL ON SCHEMA public TO chatuser;
+EOSQL

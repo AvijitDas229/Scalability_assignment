@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 import os
+import time
+from sqlalchemy.exc import OperationalError
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chatuser:avijit123@postgres:5432/chat_service_db'
@@ -12,8 +14,8 @@ jwt = JWTManager(app)
 
 postgres_host = os.environ.get('POSTGRES_HOST', 'postgres')
 postgres_db = os.environ.get('POSTGRES_DB', 'chat_service_db')
-postgres_user = os.environ.get('POSTGRES_USER', 'postgres')
-postgres_password = os.environ.get('POSTGRES_PASSWORD', 'postgres')
+postgres_user = os.environ.get('POSTGRES_USER', 'chatuser')
+postgres_password = os.environ.get('POSTGRES_PASSWORD', 'avijit123')
 
 
 # ---------------------- MODELS -----------------------
@@ -65,8 +67,22 @@ def get_messages():
 def health():
     return jsonify({'status': 'healthy'}), 200
 
+
+def connect_to_db():
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db.create_all()
+            return True
+        except OperationalError:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(5)
+    return False
+
 # ---------------------- STARTUP -----------------------
 if __name__ == '__main__':
+    connect_to_db()
     with app.app_context():
         db.create_all()  # Create tables on startup
     app.run(host='0.0.0.0', port=5000)

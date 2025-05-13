@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from sqlalchemy import text
 import os
 import time
+from sqlalchemy.exc import OperationalError
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chatuser:avijit123@postgres:5432/user_service_db'
@@ -99,6 +100,20 @@ def initialize_database():
                 print(f"Attempt {attempt + 1} failed: {str(e)}")
                 time.sleep(retry_delay * (attempt + 1))
 
+def connect_to_db():
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db.create_all()
+            return True
+        except OperationalError:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(5)
+    return False
+
+
 if __name__ == '__main__':
+    connect_to_db()
     initialize_database()
     app.run(host='0.0.0.0', port=5000)

@@ -22,5 +22,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
 EXPOSE 5000
-
+CMD ["python", "app.py"]
 CMD ["./startup.sh"]

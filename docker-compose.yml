@@ -10,7 +10,8 @@ services:
     build: ./auth-service
     command: ["sh", "-c", "./wait-for-it.sh postgres:5432 --timeout=120 -- python app.py"]
     environment:
-      ##- POSTGRES_HOST=postgres
+      POSTGRES_HOST: postgres
+      DB_HOST: postgres
       ##- POSTGRES_PORT=5432
       DB_URI: postgresql://chatuser:avijit123@postgres:5432/auth_service_db
 
@@ -114,22 +115,23 @@ services:
     platform: linux/amd64
     image: postgres:17
     container_name: postgres
+    hostname: postgres
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: chatuser 
-      POSTGRES_PASSWORD: avijit123
-      POSTGRES_DB: postgres
-      POSTGRES_MULTIPLE_DATABASES: chat_service_db,user_service_db,auth_service_db
+      POSTGRES_USER: pgadmin 
+      POSTGRES_PASSWORD: admin123
+      #POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       #- pgdata:/var/lib/postgresql/data
-      - ./postgres/init-scripts:/docker-entrypoint-initdb.d
+      - ./postgres/init-scripts/00-init.sql:/docker-entrypoint-initdb.d/00-init.sql
       # REMOVE host-mounted script and use custom image instead
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U pgadmin"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
     networks:
       - app-network
   
@@ -138,7 +140,7 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile.shard
-    image: shard0-postgres
+    image: postgres:17
     platform: linux/amd64
     container_name: postgres-shard0
     hostname: postgres-shard0
@@ -147,12 +149,14 @@ services:
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: shard0
     volumes:
-      - pgdata-shard0:/var/lib/postgresql/data
+      #- pgdata-shard0:/var/lib/postgresql/data
+      - ./postgres/init-scripts/01-shard0.sql:/docker-entrypoint-initdb.d/01-init.sql
+      #- ./postgres/init-scripts/init-shard.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U chatuser -d shard0"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
     networks:
       - app-network
 
@@ -160,7 +164,7 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile.shard
-    image: shard1-postgres
+    image: postgres:17
     platform: linux/amd64
     container_name: postgres-shard1
     hostname: postgres-shard1
@@ -169,12 +173,14 @@ services:
       POSTGRES_PASSWORD: avijit123
       POSTGRES_DB: shard1
     volumes:
-      - pgdata-shard1:/var/lib/postgresql/data
+      #- pgdata-shard1:/var/lib/postgresql/data
+      #- ./postgres/init-scripts/init-shard.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgres/init-scripts/03-shard1-schema.sql:/docker-entrypoint-initdb.d/01-init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U chatuser -d shard1"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
     networks:
       - app-network
 

@@ -1,107 +1,86 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-import jwt  # Ensure PyJWT is installed
+import jwt
 import datetime
 from functools import wraps
 import requests
 import os
+import time
+from sqlalchemy.exc import OperationalError
 
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chatuser:avijit123@postgres:5432/auth_service_db'
-app.config['SECRET_KEY'] = 'your-very-secure-secret-key'
-db = SQLAlchemy(app)
+# Initialize extensions
+db = SQLAlchemy()
 
-# --------------------- Models ---------------------
 class User(db.Model):
+    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(100), nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
 
-# -------------------- JWT Decorator -------------------
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        if 'Authorization' in request.headers:
-            bearer = request.headers['Authorization']
-            if bearer.startswith("Bearer "):
-                token = bearer[7:]
+    def set_password(self, password):
+        self.password = generate_password_hash(password)
 
-        if not token:
-            return jsonify({'error': 'Missing or invalid authorization header'}), 401
+    def check_password(self, password):
+        return check_password_hash(self.password, password)
 
-        try:
-            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            current_user = User.query.get(int(data["sub"]))
-            if not current_user:
-                return jsonify({'error': 'User not found'}), 404
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token expired'}), 401
-        except Exception as e:
-            return jsonify({'error': str(e)}), 401
+def create_app():
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://chatuser:avijit123@postgres:5432/auth_service_db'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key')
+    
+    db.init_app(app)
 
-        return f(current_user, *args, **kwargs)
-    return decorated
+    # Initialize database within app context
+    with app.app_context():
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                db.create_all()
+                break
+            except OperationalError:
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(5)
 
-# --------------------- Routes ---------------------
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'error': 'Missing username or password'}), 400
+    # JWT Decorator
+    def token_required(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            token = None
+            if 'Authorization' in request.headers:
+                token = request.headers['Authorization'].split()[1] if 'Bearer' in request.headers['Authorization'] else None
+            
+            if not token:
+                return jsonify({'error': 'Token is missing'}), 401
+                
+            try:
+                data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+                current_user = User.query.get(data['user_id'])
+            except:
+                return jsonify({'error': 'Token is invalid'}), 401
+                
+            return f(current_user, *args, **kwargs)
+        return decorated
 
-    username = data['username']
+    # Routes
+    @app.route('/register', methods=['POST'])
+    def register():
+        data = request.get_json()
+        # ... [rest of your route code]
 
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': 'Username already exists'}), 409
+    @app.route('/login', methods=['POST'])
+    def login():
+        data = request.get_json()
+        # ... [rest of your route code]
 
-    # Create user in auth-service DB
-    hashed_pw = generate_password_hash(data['password'], method='sha256')
-    user = User(username=username, password=hashed_pw)
-    db.session.add(user)
-    db.session.commit()
+    @app.route('/health', methods=['GET'])
+    def health():
+        return jsonify({"status": "healthy"}), 200
 
-    # Attempt to sync user to user-service
-    try:
-        sync_response = requests.post(
-            'http://user-service:5000/users',
-            json={
-                "username": username,
-                "email": f"{username}@placeholder.com"
-            },
-            timeout=5
-        )
-        if sync_response.status_code != 201:
-            app.logger.warning(f"user-service sync failed: {sync_response.text}")
-    except Exception as e:
-        app.logger.warning(f"user-service not reachable during sync: {e}")
-
-    return jsonify({'message': 'User registered successfully'}), 201
-
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'error': 'Missing username or password'}), 400
-
-    user = User.query.filter_by(username=data['username']).first()
-    if not user or not check_password_hash(user.password, data['password']):
-        return jsonify({'error': 'Invalid credentials'}), 401
-
-    token = jwt.encode({
-    'sub': str(user.id),
-    'user_id': str(user.id),  # Add user_id explicitly
-    'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
-}, app.config['SECRET_KEY'], algorithm="HS256")
-
-    return jsonify({'access_token': token})
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "healthy"}), 200
+    return app
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+    app = create_app()
     app.run(host='0.0.0.0', port=5000)

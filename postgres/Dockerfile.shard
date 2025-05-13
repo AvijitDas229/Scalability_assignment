@@ -14,3 +14,17 @@ RUN chmod +x /docker-entrypoint-initdb.d/*.sh
 # Health check
 HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
     CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+
+
+FROM postgres:17
+
+# Set the default user and password
+ENV POSTGRES_USER=chatuser
+ENV POSTGRES_PASSWORD=avijit123
+
+# Copy initialization scripts
+COPY init-scripts/ /docker-entrypoint-initdb.d/
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=5s --retries=10 \
+  CMD pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
